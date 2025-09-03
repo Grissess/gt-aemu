@@ -1,0 +1,2 @@
+py65
+pyaudio

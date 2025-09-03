@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser(description='Emulate the GameTank ACP')
 parser.add_argument('rom', help='Path to ROM file to load')
 parser.add_argument('-o', '--output', help='Instead of playing, write samples to named file (as 1-channel raw U8)')
 parser.add_argument('-p', '--poke', action='append', default=[], help='Poke values (of form `addr=hexstring`) into memory after loading; can be specified more than once')
+parser.add_argument('-@', '--at', action='append', default=[], help='Time pokes (of form `samples:addr=hexstring`); can be specified more than once')
 parser.add_argument('-t', '--trace', action='store_true', help='Turn on tracing (VERY slow)')
 parser.add_argument('-I', '--instructions', type=int, help='Run only up to this number of instructions')
 parser.add_argument('-C', '--cycles', type=int, help='Run only up to this number of cycles')
@@ -123,7 +124,6 @@ def main(args):
         if len(buf) < 0x1000:
             raise ValueError(f'ROM size {len(buf)} invalid; expected {0x1000} bytes')
 
-
     mem = Memory(bytearray(buf), None)
     for poke in args.poke:
         addr, _, val = poke.partition('=')
@@ -144,12 +144,23 @@ def main(args):
     else:
         pa = pyaudio.PyAudio()
         queue = []
+        last_buffer = bytes(256).replace(b'\0', b'\x80')
         def scb(data, frames, tinfo, status):
+            nonlocal last_buffer
             if not queue:
                 print('UFLOW')
-                return bytes(frames).replace(b'\0', b'\x80'), pyaudio.paContinue
-            return queue.pop(0), pyaudio.paContinue
+            else:
+                last_buffer = queue.pop(0)
+            return last_buffer, pyaudio.paContinue
         s = pa.open(format=pyaudio.paUInt8, channels=1, rate=44192, output=True, frames_per_buffer=256, stream_callback=scb)
+
+    script = {}
+    for arg in args.at:
+        scnt, _, poke = arg.partition(':')
+        addr, _, val = poke.partition('=')
+        scnt, addr, val = int(scnt, 0), int(addr, 0), bytes.fromhex(val)
+        script.setdefault(scnt, []).append((addr, val))
+    script = sorted(script.items(), key=lambda pair: pair[0])
 
     buf = bytearray(256)
     bix = 0
@@ -219,6 +230,12 @@ def main(args):
                 ):
                     print('Break.')
                     break
+
+                while script and total_samps >= script[0][0]:
+                    scnt, pokes = script.pop(0)
+                    for addr, val in pokes:
+                        for offset, byte in enumerate(val):
+                            mem[addr + offset] = byte
 
             if now > last_status + 1:
                 srav = len(samp_rate)/sum(samp_rate)

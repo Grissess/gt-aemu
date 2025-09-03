@@ -9,8 +9,10 @@ from py65.utils.devices import make_instruction_decorator
 parser = argparse.ArgumentParser(description='Emulate the GameTank ACP')
 parser.add_argument('rom', help='Path to ROM file to load')
 parser.add_argument('-o', '--output', help='Instead of playing, write samples to named file (as 1-channel raw U8)')
+parser.add_argument('-O', '--ram-output', help='When emulation ends, write the contents of RAM to this file')
 parser.add_argument('-p', '--poke', action='append', default=[], help='Poke values (of form `addr=hexstring`) into memory after loading; can be specified more than once')
 parser.add_argument('-@', '--at', action='append', default=[], help='Time pokes (of form `samples:addr=hexstring`); can be specified more than once')
+parser.add_argument('--script', help='A poke-script--a file whose lines are structured as with -@ above')
 parser.add_argument('-t', '--trace', action='store_true', help='Turn on tracing (VERY slow)')
 parser.add_argument('-I', '--instructions', type=int, help='Run only up to this number of instructions')
 parser.add_argument('-C', '--cycles', type=int, help='Run only up to this number of cycles')
@@ -155,12 +157,23 @@ def main(args):
         s = pa.open(format=pyaudio.paUInt8, channels=1, rate=44192, output=True, frames_per_buffer=256, stream_callback=scb)
 
     script = {}
-    for arg in args.at:
+    lines = []
+    if args.script:
+        with open(args.script) as f:
+            lines = list(f)
+    for arg in args.at + lines:
         scnt, _, poke = arg.partition(':')
         addr, _, val = poke.partition('=')
         scnt, addr, val = int(scnt, 0), int(addr, 0), bytes.fromhex(val)
         script.setdefault(scnt, []).append((addr, val))
     script = sorted(script.items(), key=lambda pair: pair[0])
+
+    # do any 0-time pokes, often from the scriptfile
+    while script and 0 >= script[0][0]:
+        scnt, pokes = script.pop(0)
+        for addr, val in pokes:
+            for offset, byte in enumerate(val):
+                mem[addr + offset] = byte
 
     buf = bytearray(256)
     bix = 0
@@ -231,11 +244,18 @@ def main(args):
                     print('Break.')
                     break
 
+                term = False
                 while script and total_samps >= script[0][0]:
                     scnt, pokes = script.pop(0)
                     for addr, val in pokes:
+                        if addr == 0 and not val:
+                            term = True
+                            break
                         for offset, byte in enumerate(val):
                             mem[addr + offset] = byte
+                if term:
+                    print('Break (script).')
+                    break
 
             if now > last_status + 1:
                 srav = len(samp_rate)/sum(samp_rate)
@@ -247,6 +267,9 @@ def main(args):
                 del insn_rate[:]
                 last_status = now
     print(f'Exiting after {dev.processorCycles} cycles, {total_insns} instructions, {total_samps} samples ({total_samps / 44192}s).')
+    if args.ram_output:
+        open(args.ram_output, 'wb').write(bytes(mem.backing))
+        print('RAM written.')
 
 if __name__ == '__main__':
     main(parser.parse_args())

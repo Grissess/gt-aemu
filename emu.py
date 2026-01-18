@@ -261,7 +261,7 @@ def main(args):
                 srav = len(samp_rate)/sum(samp_rate)
                 crav = sum(cycle_rate)/len(cycle_rate)
                 load = crav / dl
-                print(f'IPS avg {sum(insn_rate)/len(insn_rate)} min {min(insn_rate)} max {max(insn_rate)}\nCPS avg {crav} min {min(cycle_rate)} max {max(cycle_rate)} load {load}{"(!)" if load > 1 else ""}\nS/s {srav} RT {srav/44192}')
+                print(f'IPS avg {sum(insn_rate)/len(insn_rate)} min {min(insn_rate)} max {max(insn_rate)}\nCPS avg {crav} min {min(cycle_rate)} max {max(cycle_rate)} load {load}{"(!)" if load > 1 else ""}\nS/s {srav} RT {srav/44192} Dur: {total_samps / 44192}s')
                 del samp_rate[:]
                 del cycle_rate[:]
                 del insn_rate[:]
